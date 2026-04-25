@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<link rel="icon" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" sizes="512x512" href="icon-512.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>RSVP Reader</title>
+
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#111111">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:ital,wght@0,100..700;1,100..700&display=swap" rel="stylesheet">
+<script src="jszip.min.js"></script>
+<script src="epub.min.js"></script>
+
+</head>
+<body>
+
+<div id="reader">
+	<div id="hud">
+	<div id="leftHud">
+  <div id="chapterDropdown">
+  <div id="chapterSelected">Capítulo 1</div>
+  <div id="chapterList"></div>
+</div>
+  
+</div>
+<span id="progressText">0%</span>
+<div id="bookTitle"></div>
+<button id="openBook">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0 -5H20" stroke-width="2"></path>
+    <path d="M9 10h6" stroke-width="2"></path>
+    <path d="M12 7v6" stroke-width="2"></path>
+  </svg>
+</button>
+<input type="file" id="fileInput" accept=".epub" hidden>
+  <div id="speedControls">
+    <button id="decreaseSpeed">−</button>
+    <span id="speedDisplay">100 wpm</span>
+    <button id="increaseSpeed">+</button>
+  </div>
+</div>
+
+  <div id="textContainer">
+  <span id="left"></span>
+  <span id="center"></span>
+  <span id="right"></span>
+</div>
+  <div id="coverContainer"></div>
+</div>
+
+<script src="reader.js"></script>
+</body>
+</html>
