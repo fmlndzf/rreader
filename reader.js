@@ -8,10 +8,10 @@ let chapters = [];
 let currentChapterIndex = 0;
 
 let isAuto = false;
-let currentWPM = 100;
-let maxWPM = 300;
 
 let minWPM = 100;
+let maxWPM = 300; // velocidad actual inicial
+let maxWPMCap = 600; // 🔥 límite real superior
 let wpmStep = 25;
 
 let rafId = null;
@@ -303,7 +303,8 @@ function updateProgress() {
 }
 
 function updateSpeedDisplay() {
-  document.getElementById("speedDisplay").textContent = Math.round(maxWPM) + " wpm";
+  document.getElementById("speedDisplay").textContent = Math.round(maxWPM) + "wpm";
+  updateSpeedButtons(); // 🔥 nuevo
 }
 
 function updateCurrentChapter() {
@@ -505,29 +506,56 @@ function saveProgress() {
 }
 
 function loadProgress() {
+  if (!currentBookName) return;
+
   const saved = localStorage.getItem("rsvp_" + currentBookName);
   if (!saved) return;
 
-  const data = JSON.parse(saved);
-  index = data.index || 0;
-  maxWPM = data.maxWPM || maxWPM;
+  try {
+    const data = JSON.parse(saved);
+
+    index = data.index || 0;
+
+    // 🔥 CLAMP DE SEGURIDAD
+    maxWPM = Math.min(
+      Math.max(data.maxWPM || 300, minWPM),
+      maxWPMCap
+    );
+
+  } catch (e) {
+    console.warn("Error loading progress", e);
+  }
 }
 
 // =========================
 // SPEED BUTTONS
 // =========================
-document.getElementById("increaseSpeed").onclick = () => {
-  maxWPM += wpmStep;
-  updateSpeedDisplay();
-};
+document.getElementById("increaseSpeed").addEventListener("click", () => {
 
-document.getElementById("decreaseSpeed").onclick = () => {
-  maxWPM -= wpmStep;
-  updateSpeedDisplay();
-};
+  maxWPM = Math.min(maxWPM + wpmStep, maxWPMCap);
 
+  updateSpeedDisplay();
+  saveProgress();
+});
+
+document.getElementById("decreaseSpeed").addEventListener("click", () => {
+
+  maxWPM = Math.max(maxWPM - wpmStep, minWPM);
+
+  updateSpeedDisplay();
+  saveProgress();
+});
+
+function updateSpeedButtons() {
+
+  const inc = document.getElementById("increaseSpeed");
+  const dec = document.getElementById("decreaseSpeed");
+
+  inc.disabled = maxWPM >= maxWPMCap;
+  dec.disabled = maxWPM <= minWPM;
+}
 // =========================
-// chapterList
+// CHAPTERLIST
 // =========================
 const chapterSelected = document.getElementById("chapterSelected");
 const chapterList = document.getElementById("chapterList");
