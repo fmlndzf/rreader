@@ -173,6 +173,7 @@ html, body{
   padding:6px 10px;
   cursor:pointer;
   white-space:nowrap;
+  font-size:2vw;
 }
 
 .chapterItem:hover{
@@ -181,6 +182,21 @@ html, body{
 
 .chapterItem.active{
   color:#ff3b3b;
+}
+
+#chapterTitleDisplay{
+  position:absolute;
+  width:80%;
+  text-align:center;
+  color:#fff;
+
+  font-family:'Roboto Mono', monospace;
+  font-weight:400;
+
+  font-size: clamp(20px, 7vw, 72px);
+  line-height:1;
+
+  pointer-events:none;
 }
 
 /* =========================
