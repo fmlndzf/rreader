@@ -6,7 +6,9 @@ let index = 0;
 
 let chapters = [];
 let currentChapterIndex = 0;
-
+let forceChapterPause = false;
+let chapterStartTime = null;
+let tocMap = {};
 let isAuto = false;
 
 let minWPM = 100;
@@ -25,7 +27,7 @@ let pressStartTime = 0;
 let pressTimer = null;
 let activePointer = false;
 let inputLocked = false;
-
+let autoDirection = 1; // 1 = forward, -1 = backward
 let book;
 let currentBookName = null;
 
@@ -126,11 +128,16 @@ async function loadBook(file) {
 
   book = ePub(file);
   await book.ready;
+  
+  const toc = await book.loaded.navigation;
 
   updateBookTitleFromMetadata(file.name, book.package.metadata);
 
   await loadCover();
   await loadSpine();
+  
+  const navigation = await book.loaded.navigation;
+buildChaptersFromTOC(navigation);
 
   index = 0;
   render();
@@ -151,24 +158,29 @@ async function loadCover() {
 // =========================
 // SPINE
 // =========================
-async function loadSpine() {
 
+
+async function loadSpine() {
   let spineItems = book.spine.spineItems;
   let chapterIndex = 1;
 
   for (let item of spineItems) {
 
-    if (chunks.length > 0) {
-      chunks.push({ type: "chapterBreak" });
-    }
+    const href = item.href;
+	let chapterName = await extractChapterName(item, chapterIndex);
 
-    chapters.push({
-      name: "Capítulo " + chapterIndex,
-      index: chunks.length
-    });
+	// 🔥 guardar posición actual del chunk
+	tocMap[href] = chunks.length;
+	
+	// 🔥 marcador de capítulo
+    chunks.push({
+  type: "chapterBreak",
+  title: chapterName
+});
 
     chapterIndex++;
-
+	
+    // 🔥 cargar contenido
     let doc = await item.load(book.load.bind(book));
     let body = doc.querySelector("body");
     if (!body) continue;
@@ -178,20 +190,96 @@ async function loadSpine() {
     let walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, null, false);
     let node;
 
-    while (node = walker.nextNode()) {
-      let text = node.nodeValue.replace(/\s+/g, " ").trim();
-      if (!text) continue;
+    let pendingLetter = "";
 
-      chunks.push(...splitWords(text));
-    }
+while (node = walker.nextNode()) {
+  let text = node.nodeValue.replace(/\s+/g, " ").trim();
+  if (!text) continue;
+
+  // 🔥 detectar letra suelta (drop cap)
+  if (text.length === 1 && /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]$/.test(text)) {
+    pendingLetter = text;
+    continue;
+  }
+
+  // 🔥 si hay letra pendiente, unirla
+  if (pendingLetter) {
+    text = pendingLetter + text;
+    pendingLetter = "";
+  }
+
+  let words = splitWords(text);
+  chunks.push(...words);
+}
 
     chunks.push("\n\n");
+
     item.unload();
   }
 
   buildChapterDropdown();
 }
 
+async function extractChapterName(item, fallbackIndex) {
+  try {
+    const doc = await item.load(book.load.bind(book));
+
+    // 🔥 prioridad 1: h1
+    let h1 = doc.querySelector("h1");
+    if (h1 && h1.textContent.trim()) {
+      return h1.textContent.trim();
+    }
+
+    // 🔥 prioridad 2: h2
+    let h2 = doc.querySelector("h2");
+    if (h2 && h2.textContent.trim()) {
+      return h2.textContent.trim();
+    }
+
+    // 🔥 prioridad 3: title
+    let title = doc.querySelector("title");
+    if (title && title.textContent.trim()) {
+      return title.textContent.trim();
+    }
+
+  } catch (e) {
+    console.warn("Error extracting chapter name", e);
+  }
+
+  // fallback
+  return "Capítulo " + fallbackIndex;
+}
+
+
+function buildChaptersFromTOC(toc) {
+
+  chapters = [];
+
+  function traverse(items) {
+    items.forEach(item => {
+
+      // limpiar href (#fragmentos)
+      let href = item.href.split("#")[0];
+
+      if (tocMap[href] !== undefined) {
+        chapters.push({
+          name: item.label.trim(),
+          index: tocMap[href]
+        });
+      }
+
+      // 🔥 subniveles (recursivo)
+      if (item.subitems && item.subitems.length > 0) {
+        traverse(item.subitems);
+      }
+
+    });
+  }
+
+  traverse(toc.toc);
+
+  buildChapterDropdown();
+}
 // =========================
 // DROPDOWN
 // =========================
@@ -207,10 +295,23 @@ function buildChapterDropdown() {
     item.textContent = chap.name;
 
     item.onclick = () => {
-      index = chap.index;
+      
       currentChapterIndex = i;
 
-      render();
+      index = chap.index;
+	  
+	  forceChapterPause = true;
+
+// 🔥 forzar pausa simulando transición
+accumulator = 0;
+lastTime = performance.now();
+chapterStartTime = null;//sacar
+// 🔥 asegurar que detecte chapterBreak previo
+if (index > 0) {
+  chunks[index - 1] = { type: "chapterBreak" };
+}
+
+render();
       saveProgress();
 
       selected.textContent = chap.name;
@@ -252,35 +353,82 @@ function render() {
 
   let current = chunks[index];
 
-  if (typeof current === "object" && current.type === "cover") {
-    container.style.display = "none";
-    cover.style.display = "flex";
-    cover.innerHTML = `<img src="${current.src}" />`;
+// 🔥 mostrar portada SIEMPRE que corresponda
+if (typeof current === "object" && current.type === "cover") {
 
-    updateProgress();
-    updateSpeedDisplay();
-    updateCurrentChapter();
-    return;
+  let container = document.getElementById("textContainer");
+  let cover = document.getElementById("coverContainer");
+
+  // 🔥 ocultar ORP
+  container.style.display = "none";
+
+  // 🔥 mostrar portada
+  cover.style.display = "flex";
+  cover.innerHTML = `<img src="${current.src}" />`;
+
+  // 🔥 🔥 IMPORTANTE: ocultar título de capítulo
+  let titleEl = document.getElementById("chapterTitleDisplay");
+  if (titleEl) {
+    titleEl.style.display = "none";
   }
+
+  updateProgress();
+  updateSpeedDisplay();
+  updateCurrentChapter();
+
+  return;
+}
 
   cover.style.display = "none";
   container.style.display = "block";
 
-  if (
-    (typeof current === "object" && current.type === "chapterBreak") ||
-    current === "\n\n"
-  ) {
-    const emptyChar = "\u200B";
+  if (typeof current === "object" && current.type === "chapterBreak") {
 
-    leftEl.textContent = emptyChar;
-    centerEl.textContent = emptyChar;
-    rightEl.textContent = emptyChar;
+  const container = document.getElementById("textContainer");
 
-    updateProgress();
-    updateSpeedDisplay();
-    updateCurrentChapter();
-    return;
-  }
+  // 🔥 modo título de capítulo
+  // ocultar ORP
+leftEl.style.visibility = "hidden";
+centerEl.style.visibility = "hidden"; // 🔥 importante
+rightEl.style.visibility = "hidden";
+
+// 🔥 asegurar que center tenga tamaño
+  centerEl.textContent = "•";
+
+// crear o actualizar título
+let titleEl = document.getElementById("chapterTitleDisplay");
+
+if (!titleEl) {
+  titleEl = document.createElement("div");
+  titleEl.id = "chapterTitleDisplay";
+  document.getElementById("reader").appendChild(titleEl);
+}
+
+titleEl.textContent = current.title || "";
+titleEl.style.display = "block";
+
+requestAnimationFrame(() => {
+  alignChapterTitleToORP();
+}); // 🔥 AQUÍ
+
+  document.getElementById("coverContainer").style.display = "none";
+  container.style.display = "block";
+
+  updateProgress();
+  updateSpeedDisplay();
+  updateCurrentChapter();
+
+  return;
+}
+
+// 🔥 RESTAURAR ORP (cuando NO es capítulo ni cover)
+leftEl.style.visibility = "visible";
+centerEl.style.visibility = "visible";
+rightEl.style.visibility = "visible";
+
+// ocultar título si existe
+let titleEl = document.getElementById("chapterTitleDisplay");
+if (titleEl) titleEl.style.display = "none";
 
   let parts = splitORP(current);
 
@@ -347,6 +495,54 @@ function splitORP(word) {
   };
 }
 
+	function normalizeText(str) {
+  return str
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function getNextWords(startIndex, count = 6) {
+  let words = [];
+
+  for (let i = startIndex; i < chunks.length; i++) {
+    if (typeof chunks[i] === "string") {
+      words.push(chunks[i]);
+      if (words.length >= count) break;
+    }
+  }
+
+  return words.join(" ");
+}
+
+function findPreviousChapterBreak(idx) {
+  for (let i = idx - 1; i >= 0; i--) {
+    if (typeof chunks[i] === "object" && chunks[i].type === "chapterBreak") {
+      return chunks[i];
+    }
+  }
+  return null;
+}
+
+function alignChapterTitleToORP() {
+
+  const centerEl = document.getElementById("center");
+  const titleEl = document.getElementById("chapterTitleDisplay");
+
+  if (!centerEl || !titleEl) return;
+
+  const rect = centerEl.getBoundingClientRect();
+
+  if (rect.width === 0 && rect.height === 0) return; // 🔒 protección extra
+
+  const x = rect.left + rect.width / 2;
+  const y = rect.top + rect.height / 2;
+
+  titleEl.style.left = x + "px";
+  titleEl.style.top = y + "px";
+  titleEl.style.transform = "translate(-50%, -50%)";
+}
+
 // =========================
 // TITLE
 // =========================
@@ -359,19 +555,75 @@ function updateBookTitleFromMetadata(fileName, metadata) {
 // NAV
 // =========================
 function next() {
-  if (index < chunks.length - 1) {
+  if (index >= chunks.length - 1) return;
+
+  // 🔥 avanzar índice (saltando saltos de línea)
+  do {
     index++;
-    render();
-    saveProgress();
+  } while (
+    index < chunks.length &&
+    chunks[index] === "\n\n"
+  );
+
+  let current = chunks[index];
+
+  // 🔥 evitar duplicado de título
+  if (typeof current === "string") {
+
+    let prevChunk = findPreviousChapterBreak(index);
+
+    // 🔒 validación crítica
+    if (!prevChunk || !prevChunk.title) {
+      render();
+      saveProgress();
+      return;
+    }
+
+    let chapterTitle = normalizeText(prevChunk.title);
+    let upcomingText = normalizeText(getNextWords(index, 8));
+
+    // 🔥 comparar inicio del texto con título
+    if (chapterTitle && upcomingText.startsWith(chapterTitle)) {
+
+      let wordsToSkip = chapterTitle.split(" ").length;
+
+      for (let i = 0; i < wordsToSkip; i++) {
+        if (index < chunks.length - 1) {
+          index++;
+        }
+      }
+    }
   }
+
+  render();
+  saveProgress();
 }
 
 function prev() {
-  if (index > 0) {
+  if (index <= 0) return;
+
+  do {
     index--;
-    render();
-    saveProgress();
+  } while (
+    index > 0 &&
+    chunks[index] === "\n\n"
+  );
+
+  if (typeof chunks[index] === "string") {
+  let prevChunk = chunks[index - 1];
+
+  if (prevChunk && prevChunk.type === "chapterBreak") {
+    let chapterTitle = normalizeText(prevChunk.title || "");
+    let currentWord = normalizeText(chunks[index]);
+
+    if (chapterTitle.startsWith(currentWord)) {
+      index--;
+    }
   }
+}
+
+  render();
+  saveProgress();
 }
 
 function startAuto() {
@@ -384,13 +636,25 @@ function startAuto() {
   lastTime = startTime;
   accumulator = 0;
 
+  chapterStartTime = null; // 🔥 reset
+
   function loop(now) {
     if (!isAuto) return;
 
     let delta = now - lastTime;
     lastTime = now;
 
-    let elapsed = now - startTime;
+    // 🔥 detectar inicio de capítulo
+    if (
+      typeof chunks[index] === "object" &&
+      chunks[index].type === "chapterBreak"
+    ) {
+      chapterStartTime = now;
+    }
+
+    let elapsed = chapterStartTime
+      ? now - chapterStartTime
+      : now - startTime;
 
     currentWPM = elapsed < accelerationDuration
       ? 100 + (elapsed / accelerationDuration) * (maxWPM - 100)
@@ -400,7 +664,9 @@ function startAuto() {
     accumulator += delta;
 
     while (accumulator >= delay) {
-      next();
+      if (autoDirection === 1) next();
+      else prev();
+
       accumulator -= delay;
     }
 
@@ -412,19 +678,19 @@ function startAuto() {
 
 function calculateDelay() {
   let base = 60000 / currentWPM;
-  let word = chunks[index - 1] || "";
+  let current = chunks[index];
 
-  // pausa de capítulo
-  if (typeof word === "object" && word.type === "chapterBreak") {
-    return base * 4.5;
+  // 🔥 capítulo
+  if (typeof current === "object" && current.type === "chapterBreak") {
+    return 1000;
   }
 
   // salto de párrafo
-  if (word === "\n\n") return base * 1.8;
+  if (current === "\n\n") return base * 1.8;
 
-  if (typeof word !== "string") return base;
+  if (typeof current !== "string") return base;
 
-  let len = word.length;
+  let len = current.length;
 
   if (len >= 7) {
     let extraFactor = 1 + Math.min((len - 6) * 0.05, 0.4);
@@ -464,7 +730,16 @@ document.addEventListener("pointerdown", e => {
 
   pressStartTime = Date.now();
 
-  pressTimer = setTimeout(startAuto, holdDelay);
+  const isRightSide = e.clientX > window.innerWidth / 2;
+
+// definir dirección
+autoDirection = isRightSide ? 1 : -1;
+
+// iniciar autoplay según lado
+pressTimer = setTimeout(() => {
+  startAuto();
+}, holdDelay);
+
 });
 
 document.addEventListener("pointerup", e => {
