@@ -4,6 +4,7 @@ const ASSETS = [
   "./",
   "./index.html",
   "./style.css",
+  "./Roboto-Mono-regular.woff2",
   "./reader.js",
   "./epub.min.js",
   "./jszip.min.js", // 🔥 agregar esto
