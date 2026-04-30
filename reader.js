@@ -540,7 +540,7 @@ function alignChapterTitleToORP() {
 
   titleEl.style.left = x + "px";
   titleEl.style.top = y + "px";
-  titleEl.style.transform = "translate(-50%, -50%)";
+  titleEl.style.transform = "translate(-50%, -25%)";
 }
 
 // =========================
