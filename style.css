@@ -230,10 +230,11 @@ html, body{
 #bookTitle{
   grid-column:2;
   justify-self:center;
+  padding-left: 3vw;
   font-size:2.5vw;
   opacity:0.4;
   pointer-events:none;
-  text-align:center;
+  text-align:left;
   line-height:1.2;
   word-break:break-word;
   max-width:100%;

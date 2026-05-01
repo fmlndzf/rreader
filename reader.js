@@ -107,6 +107,26 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   updateSpeedDisplay();
+  
+  window.addEventListener("resize", () => {
+
+  const titleEl = document.getElementById("chapterTitleDisplay");
+
+  if (titleEl && titleEl.style.display === "block") {
+
+    setTimeout(() => {
+      requestAnimationFrame(() => {
+        alignChapterTitleToORP();
+      });
+    }, 50); // 🔥 pequeño delay
+
+  }
+});
+
+window.addEventListener("orientationchange", () => {
+  setTimeout(() => alignChapterTitleToORP(), 100);
+});
+
 });
 
 // =========================
