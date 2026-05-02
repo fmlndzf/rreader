@@ -157,7 +157,7 @@ async function loadBook(file) {
   await loadSpine();
   
   const navigation = await book.loaded.navigation;
-buildChaptersFromTOC(navigation);
+  buildChaptersFromTOC(navigation);
 
   index = 0;
   render();
@@ -179,32 +179,33 @@ async function loadCover() {
 // SPINE
 // =========================
 
-
 async function loadSpine() {
+  
   let spineItems = book.spine.spineItems;
   let chapterIndex = 1;
 
   for (let item of spineItems) {
 
     const href = item.href;
-	let chapterName = await extractChapterName(item, chapterIndex);
+    let chapterName = await extractChapterName(item, chapterIndex);
 
-	// 🔥 guardar posición actual del chunk
-	tocMap[href] = chunks.length;
-	
-	// 🔥 marcador de capítulo
+    // 🔥 guardar posición actual del chunk (TOC)
+    tocMap[href] = chunks.length;
+
+    // 🔥 marcador de capítulo
     chunks.push({
-  type: "chapterBreak",
-  title: chapterName
-});
+      type: "chapterBreak",
+      title: chapterName
+    });
 
     chapterIndex++;
-	
+
     // 🔥 cargar contenido
     let doc = await item.load(book.load.bind(book));
     let body = doc.querySelector("body");
     if (!body) continue;
 
+    // 🔥 eliminar títulos HTML internos
     doc.querySelectorAll("title").forEach(t => t.remove());
 
     let walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, null, false);
@@ -212,33 +213,87 @@ async function loadSpine() {
 
     let pendingLetter = "";
 
-while (node = walker.nextNode()) {
-  let text = node.nodeValue.replace(/\s+/g, " ").trim();
-  if (!text) continue;
+    // 🔥 normalizar título del capítulo
+    let normalizedChapterTitle = normalizeForCompare(chapterName || "");
+	  let detectingTitle = !!normalizedChapterTitle && normalizedChapterTitle.length >= 3;
+	  let tempBuffer = [];
 
-  // 🔥 detectar letra suelta (drop cap)
-  if (text.length === 1 && /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]$/.test(text)) {
-    pendingLetter = text;
-    continue;
+
+    while (node = walker.nextNode()) {
+
+      let text = node.nodeValue.replace(/\s+/g, " ").trim();
+      if (!text) continue;
+
+      // 🔥 detectar letra suelta (drop cap)
+      if (text.length === 1 && /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]$/.test(text)) {
+        pendingLetter = text;
+        continue;
+      }
+
+      // 🔥 unir letra pendiente
+      if (pendingLetter) {
+        text = pendingLetter + text;
+        pendingLetter = "";
+      }
+
+      let words = splitWords(text);
+
+      for (let word of words) {
+
+  if (!word.trim()) continue;
+
+  // 🔥 DETECCIÓN DE TÍTULO DUPLICADO
+  if (detectingTitle) {
+
+    tempBuffer.push(word);
+    let bufferText = normalizeForCompare(tempBuffer.join(" "));
+
+    // ✔️ coincidencia completa → insertar skips
+    if (
+  bufferText === normalizedChapterTitle ||
+  bufferText.endsWith(normalizedChapterTitle)
+) {
+
+      chunks.push(...Array(tempBuffer.length).fill({ type: "skip" }));
+
+      tempBuffer = [];
+      detectingTitle = false;
+      continue;
+    }
+
+    // ✔️ coincidencia parcial → seguir acumulando
+    if (normalizedChapterTitle.startsWith(bufferText)) {
+      continue;
+    }
+
+    // ❌ no coincide → liberar buffer
+    chunks.push(...tempBuffer);
+
+    tempBuffer = [];
+    detectingTitle = false;
   }
 
-  // 🔥 si hay letra pendiente, unirla
-  if (pendingLetter) {
-    text = pendingLetter + text;
-    pendingLetter = "";
-  }
-
-  let words = splitWords(text);
-  chunks.push(...words);
+  // 🔥 flujo normal
+  chunks.push(word);
 }
+	  
+	
+  }
 
-    chunks.push("\n\n");
+	// 🔥 volcar buffer restante (solo una vez por capítulo)
+if (tempBuffer.length) {
+  chunks.push(...tempBuffer);
+  tempBuffer = [];
+}
+	chunks.push("\n\n");
 
     item.unload();
-  }
-
-  buildChapterDropdown();
+	
+	}
+	
+	buildChapterDropdown();
 }
+
 
 async function extractChapterName(item, fallbackIndex) {
   try {
@@ -300,6 +355,7 @@ function buildChaptersFromTOC(toc) {
 
   buildChapterDropdown();
 }
+
 // =========================
 // DROPDOWN
 // =========================
@@ -365,13 +421,29 @@ function scrollToActiveChapter() {
 function render() {
 
   let container = document.getElementById("textContainer");
+  
+  let current = chunks[index];
+
+// 🔥 SKIP REAL (antes de cualquier render)
+if (current?.type === "skip") {
+  do {
+    index++;
+  } while (
+    index < chunks.length &&
+    chunks[index]?.type === "skip"
+  );
+
+  current = chunks[index];
+}
+
+if (!current) return;
+  
   let cover = document.getElementById("coverContainer");
 
   let leftEl = document.getElementById("left");
   let centerEl = document.getElementById("center");
   let rightEl = document.getElementById("right");
 
-  let current = chunks[index];
 
 // 🔥 mostrar portada SIEMPRE que corresponda
 if (typeof current === "object" && current.type === "cover") {
@@ -515,10 +587,13 @@ function splitORP(word) {
   };
 }
 
-	function normalizeText(str) {
-  return str
+	function normalizeText(text) {
+  return text
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .normalize("NFD") // separa acentos
+    .replace(/[\u0300-\u036f]/g, "") // elimina acentos
+    .replace(/[^\p{L}\p{N}\s]/gu, "") // elimina símbolos
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -563,6 +638,40 @@ function alignChapterTitleToORP() {
   titleEl.style.transform = "translate(-50%, -25%)";
 }
 
+function romanToInt(roman) {
+  const map = {
+    i: 1, v: 5, x: 10, l: 50,
+    c: 100, d: 500, m: 1000
+  };
+
+  let result = 0;
+  let prev = 0;
+
+  roman = roman.toLowerCase();
+
+  for (let i = roman.length - 1; i >= 0; i--) {
+    let curr = map[roman[i]] || 0;
+    if (curr < prev) result -= curr;
+    else result += curr;
+    prev = curr;
+  }
+
+  return result;
+}
+
+function normalizeNumbers(text) {
+  return text.replace(/\b[ivxlcdm]+\b/gi, match => {
+    return romanToInt(match).toString();
+  });
+}
+
+function normalizeForCompare(text) {
+  let normalized = normalizeText(text);
+  normalized = normalizeNumbers(normalized);
+  return normalized;
+}
+
+
 // =========================
 // TITLE
 // =========================
@@ -577,43 +686,12 @@ function updateBookTitleFromMetadata(fileName, metadata) {
 function next() {
   if (index >= chunks.length - 1) return;
 
-  // 🔥 avanzar índice (saltando saltos de línea)
   do {
     index++;
   } while (
     index < chunks.length &&
-    chunks[index] === "\n\n"
+    (chunks[index] === "\n\n" || chunks[index]?.type === "skip")
   );
-
-  let current = chunks[index];
-
-  // 🔥 evitar duplicado de título
-  if (typeof current === "string") {
-
-    let prevChunk = findPreviousChapterBreak(index);
-
-    // 🔒 validación crítica
-    if (!prevChunk || !prevChunk.title) {
-      render();
-      saveProgress();
-      return;
-    }
-
-    let chapterTitle = normalizeText(prevChunk.title);
-    let upcomingText = normalizeText(getNextWords(index, 8));
-
-    // 🔥 comparar inicio del texto con título
-    if (chapterTitle && upcomingText.startsWith(chapterTitle)) {
-
-      let wordsToSkip = chapterTitle.split(" ").length;
-
-      for (let i = 0; i < wordsToSkip; i++) {
-        if (index < chunks.length - 1) {
-          index++;
-        }
-      }
-    }
-  }
 
   render();
   saveProgress();
@@ -626,21 +704,8 @@ function prev() {
     index--;
   } while (
     index > 0 &&
-    chunks[index] === "\n\n"
+    (chunks[index] === "\n\n" || chunks[index]?.type === "skip")
   );
-
-  if (typeof chunks[index] === "string") {
-  let prevChunk = chunks[index - 1];
-
-  if (prevChunk && prevChunk.type === "chapterBreak") {
-    let chapterTitle = normalizeText(prevChunk.title || "");
-    let currentWord = normalizeText(chunks[index]);
-
-    if (chapterTitle.startsWith(currentWord)) {
-      index--;
-    }
-  }
-}
 
   render();
   saveProgress();
